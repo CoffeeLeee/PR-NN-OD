@@ -26,6 +26,7 @@ def main():
     global args
     args = parser.parse_known_args()[0]
     
+    
     # constant and input paras
     encoder_dict, encoder_definite, channel_dict, dummy_dict, ini_metric = Constant()
     
