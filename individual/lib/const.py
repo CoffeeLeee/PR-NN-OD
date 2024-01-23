@@ -153,24 +153,24 @@ def Constant_od():
     
     # List of starting dummy values (based on EEPR4 state machine)
     dummy_dict_start = {
-        0 : torch.tensor([[-8, -8, -8, -8, -8]] / np.sqrt(65)).float(), 
-        1 : torch.tensor([[-6, -8, -8, -8, -8]] / np.sqrt(65)).float(),
-        2 : torch.tensor([[-4, -6, -8, -8, -8]] / np.sqrt(65)).float(), 
-        3 : torch.tensor([[-2, -6, -8, -8, -8]] / np.sqrt(65)).float(),
-        4 : torch.tensor([[-4, -4, -6, -8, -8]] / np.sqrt(65)).float(), 
-        5 : torch.tensor([[-2, -4, -6, -8, -8]] / np.sqrt(65)).float(),
-        6 : torch.tensor([[0, -2, -6, -8, -8]] / np.sqrt(65)).float(), 
-        7 : torch.tensor([[2, -2, -6, -8, -8]] / np.sqrt(65)).float(),
-        8 : torch.tensor([[-4, -4, -4, -6, -8]] / np.sqrt(65)).float(), 
-        9 : torch.tensor([[-2, -4, -4, -6, -8]] / np.sqrt(65)).float(),
-        10 : torch.tensor([[-6, -4, -2, -0, -8]] / np.sqrt(65)).float(),
-        11 : torch.tensor([[-6, -4, -2, 2, -8]] / np.sqrt(65)).float(),
-        12 : torch.tensor([[-6, -2, 0, 0, -8]] / np.sqrt(65)).float(),
-        13 : torch.tensor([[-6, -2, 0, 2, -8]] / np.sqrt(65)).float(),
-        14 : torch.tensor([[-6, -2, 2, 4, -8]] / np.sqrt(65)).float(),
-        15 : torch.tensor([[6, 2, -2, -6, -8]] / np.sqrt(65)).float(),
+        0 : torch.tensor([[-8, -8, -8, -8, -8]]) / np.sqrt(65),
+        1 : torch.tensor([[-8, -8, -8, -8, -6]]) / np.sqrt(65),
+        2 : torch.tensor([[-8, -8, -8, -6, -4]]) / np.sqrt(65),
+        3 : torch.tensor([[-8, -8, -8, -6, -2]]) / np.sqrt(65) ,
+        4 : torch.tensor([[-8, -8, -6, -4, -4]]) / np.sqrt(65) ,
+        5 : torch.tensor([[-8, -8, -6, -4, -2]]) / np.sqrt(65) ,
+        6 : torch.tensor([[-8, -8, -6, -2,  0]]) / np.sqrt(65) ,
+        7 : torch.tensor([[-8, -8, -6, -2,  2]]) / np.sqrt(65) ,
+        8 : torch.tensor([[-8, -6, -4, -4, -4]]) / np.sqrt(65) ,
+        9 : torch.tensor([[-8, -6, -4, -4, -2]]) / np.sqrt(65) ,
+        10 : torch.tensor([[-8,  0, -2, -4, -6]]) / np.sqrt(65) ,
+        11 : torch.tensor([[-8,  2, -2, -4, -6]]) / np.sqrt(65) ,
+        12 : torch.tensor([[-8,  0,  0, -2, -6]]) / np.sqrt(65) ,
+        13 : torch.tensor([[-8,  2,  0, -2, -6]]) / np.sqrt(65) ,
+        14 : torch.tensor([[-8,  4,  2, -2, -6]]) / np.sqrt(65) ,
+        15 : torch.tensor([[-8, -6, -2,  2,  6]]) / np.sqrt(65) ,
     }
-    
+
     # List of ending dummy values (based on EEPR4 state machine)
     dummy_dict_end = {
         0 : np.array([[-8, -8, -8, -8, -8]] / np.sqrt(65)), 
@@ -190,8 +190,21 @@ def Constant_od():
         14 : np.array([[2, -4, -6, -8, -8]] / np.sqrt(65)),
         15 : np.array([[6, 2, -2, -6, -8]] / np.sqrt(65)),
     }
-    
-    dummy_dict_end_eval = torch.tensor([[-8, -8, -8, -8, -8]] / np.sqrt(65)).float()
+
+    dummy_dict_end_path = {
+        0 : np.array([[-1, -1, -1, -1, -1]]),
+        1 : np.array([[1, -1, -1, -1, -1]]),
+        3 : np.array([[-1, -1, -1, -1, -1]]),
+        6 : np.array([[-1, -1, -1, -1, -1]]),
+        7 : np.array([[-1, -1, -1, -1, -1]]),
+        8 : np.array([[-1, -1, -1, -1, -1]]),
+        9 : np.array([[1, -1, -1, -1, -1]]),
+        12 : np.array([[-1, -1, -1, -1, -1]]),
+        14 : np.array([[-1, -1, -1, -1, -1]]),
+        15 : np.array([[-1, -1, -1, -1, -1]]),
+    }
+
+    dummy_dict_end_eval = torch.tensor([[-8, -8, -8, -8, -8]] / np.sqrt(65))
     
     return (encoder_dict, channel_dict, dummy_dict_start, 
-            dummy_dict_end, dummy_dict_end_eval)
+            dummy_dict_end, dummy_dict_end_path, dummy_dict_end_eval)

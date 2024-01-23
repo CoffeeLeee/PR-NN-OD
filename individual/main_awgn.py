@@ -10,23 +10,25 @@ import numpy as np
 import math
 import sys
 import datetime
+import time
 np.set_printoptions(threshold=sys.maxsize)
 
-from lib import Constant
+from lib import Constant,Constant_od
 from lib.utils import codeword_threshold, find_index
-
+from scipy.signal import convolve2d
+#from nn_eq_trainer import CustomModel
 parser = argparse.ArgumentParser()
 
 # learning parameters
 parser.add_argument('-learning_rate', type = float, default=0.001)
 parser.add_argument('-momentum', type=float, default=0.9)
-parser.add_argument('-num_epoch', type=int, default=4000)
+parser.add_argument('-num_epoch', type=int, default=5)
 parser.add_argument('-epoch_start', type=int, default=0)
 parser.add_argument('-num_batch', type=int, default=200)
 parser.add_argument('-weight_decay', type=float, default=0.0001)
-parser.add_argument('-eval_freq', type=int, default=50)
-parser.add_argument('-eval_start', type=int, default=2000)
-parser.add_argument('-print_freq_ep', type=int, default=50)
+parser.add_argument('-eval_freq', type=int, default=1)
+parser.add_argument('-eval_start', type=int, default=1)
+parser.add_argument('-print_freq_ep', type=int, default=1)
 
 parser.add_argument('-batch_size_snr_train', type=int, default=30)
 parser.add_argument('-batch_size_snr_validate', type=int, default=600)
@@ -37,7 +39,7 @@ parser.add_argument('-prob_step_ep', type=int, default=50)
 
 # storing path
 parser.add_argument('-result', type=str, default='result.txt')
-parser.add_argument('-checkpoint', type=str, default='./checkpoint.pth.tar')
+parser.add_argument('-checkpoint', type=str, default='./checkpoint_awgn_snr10.pth.tar')
 parser.add_argument('-resume', default='', type=str, metavar='PATH', 
                     help='path to latest checkpoint (default:none)')
 
@@ -57,11 +59,15 @@ parser.add_argument('-rnn_layer', type=int, default=4)
 parser.add_argument('-rnn_dropout_ratio', type=float, default=0)
 
 # channel parameters
-parser.add_argument('-snr_start', type=float, default=8.5)
-parser.add_argument('-snr_stop', type=float, default=10.5)
-parser.add_argument('-snr_step', type=float, default=0.5)
+parser.add_argument('-snr_start', type=float, default=9.999)
+parser.add_argument('-snr_stop', type=float, default=10.003)
+parser.add_argument('-snr_step', type=float, default=0.001)
+
+#test mode
+parser.add_argument('-test_mode', type=int, default=0)
 
 def main():
+    
     global args
     args = parser.parse_known_args()[0]
     
@@ -69,90 +75,93 @@ def main():
     os.environ['CUDA_VISIBLE_DEVICES'] = "0"
     if torch.cuda.is_available():
         device = torch.device("cuda")
+    for snr in range(12, 24, 2):
+        # write the results
+        dir_name = './output_' + datetime.datetime.strftime(datetime.datetime.now(), 
+                                                            '%Y-%m-%d_%H:%M:%S') + '/'
+        os.mkdir(dir_name)
+        result_path = dir_name + args.result
+        result = open(result_path, 'w+')
         
-    # write the results
-    dir_name = './output_' + datetime.datetime.strftime(datetime.datetime.now(), 
-                                                        '%Y-%m-%d_%H:%M:%S') + '/'
-    os.mkdir(dir_name)
-    result_path = dir_name + args.result
-    result = open(result_path, 'w+')
-    
-    # data loader
-    (encoder_dict, channel_dict, dummy_dict_start, 
-     dummy_dict_end, dummy_dict_end_eval) = Constant()
-    data_class = Dataset(args, device, encoder_dict, channel_dict, 
-                         dummy_dict_start, dummy_dict_end)
-    
-    snr_point = int((args.snr_stop-args.snr_start)/args.snr_step+1)
-    
-    # model
-    model = Model(args, device).to(device)
-    
-    # criterion and optimizer
-    optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), 
-                                 lr=args.learning_rate, 
-                                 eps=1e-08, 
-                                 weight_decay=args.weight_decay)
-    
-    # optionally resume from a checkpoint
-    if args.resume:
-        if os.path.isfile(args.resume):
-            print("=> loading checkpoint '{}'".format(args.resume))
-            checkpoint = torch.load(args.resume)
-            args.epoch_start = checkpoint['epoch']
-            model.load_state_dict(checkpoint['state_dict'])
-            optimizer.load_state_dict(checkpoint['optimizer'])
-            print("=> loaded checkpoint '{}' (epoch {})"
-                  .format(args.resume, checkpoint['epoch']))
-        else:
-            print("=> no checkpoint found at '{}'".format(args.resume))
+        # data loader
+        (encoder_dict, channel_dict, dummy_dict_start, 
+        dummy_dict_end, dummy_dict_end_path ,dummy_dict_end_eval) = Constant_od()
+        
+        data_class = Dataset(args, device, encoder_dict, channel_dict, 
+                            dummy_dict_start, dummy_dict_end, loaded_model, dummy_dict_end_path)
+        
+        snr_point = int((args.snr_stop-args.snr_start)/args.snr_step+1)
+        
 
-     
-    # train and validation
-    
-    prob_start_ori = 0.1
-    if args.epoch_start > args.eval_start:
-        prob_start = 0.5
-    else:
-        prob_start = prob_start_ori + (args.prob_up * 
-                                       (args.epoch_start // args.prob_step_ep))
-    
-    prob_end = 0.5
-    prob_step = int((prob_end - prob_start_ori) / args.prob_up)
-    prob_ep_list = list(range(prob_step*args.prob_step_ep, 0, -args.prob_step_ep))
-    prob = prob_start
-    for epoch in range(args.epoch_start, args.num_epoch):
+        loaded_model = torch.load('/home/likefei/PR-NN_Detector_PRchannel/individual/nneq_snr' + str(snr) + '.pt')
+        args.checkpoint = './checkpoint_awgn_snr' + str(snr) + '.pth.tar'
+        args.snr_start = snr - 0.001
+        args.snr_end = snr + 0.003
+        # model
+        model = Model(args, device).to(device)
         
-        # increase the probability each 10 epochs
-        if epoch in prob_ep_list:
-            prob += args.prob_up
+        # criterion and optimizer
+        optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), 
+                                    lr=args.learning_rate, 
+                                    eps=1e-08, 
+                                    weight_decay=args.weight_decay)
         
-        # train and validate
-        train_loss = train(data_class, prob, model, optimizer, epoch, device)
-        valid_loss, ber = validate(data_class, prob, channel_dict, dummy_dict_start, 
-                       dummy_dict_end_eval, model, epoch, device)
-        
-        result.write('epoch %d \n' % epoch)
-        result.write('information prob.'+str(prob)+'\n')
-        result.write('Train loss:'+ str(train_loss)+'\n')
-        result.write('Validation loss:'+ str(valid_loss)+'\n')
-        if (epoch >= args.eval_start and epoch % args.eval_freq == 0):
-            result.write('-----SNR[dB]:'+str(ber)+'\n')
+        # optionally resume from a checkpoint
+        if args.resume:
+            if os.path.isfile(args.resume):
+                print("=> loading checkpoint '{}'".format(args.resume))
+                checkpoint = torch.load(args.resume)
+                args.epoch_start = checkpoint['epoch']
+                model.load_state_dict(checkpoint['state_dict'])
+                optimizer.load_state_dict(checkpoint['optimizer'])
+                print("=> loaded checkpoint '{}' (epoch {})"
+                    .format(args.resume, checkpoint['epoch']))
+            else:
+                print("=> no checkpoint found at '{}'".format(args.resume))
+
+        prob_start_ori = 0.1
+        if args.epoch_start > args.eval_start:
+            prob_start = 0.5
         else:
-            result.write('-----:no evaluation'+'\n')
-        result.write('\n')
+            prob_start = prob_start_ori + (args.prob_up * 
+                                        (args.epoch_start // args.prob_step_ep))
         
-        torch.save({
-            'epoch': epoch+1,
-            'arch': 'rnn',
-            'state_dict': model.state_dict(),
-            'optimizer': optimizer.state_dict(),
-        }, args.checkpoint)
+        prob_end = 0.5
+        prob_step = int((prob_end - prob_start_ori) / args.prob_up)
+        prob_ep_list = list(range(prob_step*args.prob_step_ep, 0, -args.prob_step_ep))
+        prob = prob_start
+        for epoch in range(args.epoch_start, args.num_epoch):
+            
+            # increase the probability each 10 epochs
+            if epoch in prob_ep_list:
+                prob += args.prob_up
+            
+            # train and validate
+            train_loss = train(data_class, prob, model, optimizer, epoch, device)
+            valid_loss, ber = validate(data_class, prob, channel_dict, dummy_dict_start, 
+                        dummy_dict_end_eval, model, epoch, device)
+            
+            result.write('epoch %d \n' % epoch)
+            result.write('information prob.'+str(prob)+'\n')
+            result.write('Train loss:'+ str(train_loss)+'\n')
+            result.write('Validation loss:'+ str(valid_loss)+'\n')
+            if (epoch >= args.eval_start and epoch % args.eval_freq == 0):
+                result.write('-----SNR[dB]:'+str(ber)+'\n')
+            else:
+                result.write('-----:no evaluation'+'\n')
+            result.write('\n')
+            
+            torch.save({
+                'epoch': epoch+1,
+                'arch': 'rnn',
+                'state_dict': model.state_dict(),
+                'optimizer': optimizer.state_dict(),
+            }, args.checkpoint)
 
 ## Dataset: generate dataset for neural network
 class Dataset(object):
     def __init__(self, args, device, encoder_machine, channel_machine, 
-                 dummy_dict_start, dummy_dict_end):
+                 dummy_dict_start, dummy_dict_end, loaded_model, dummy_dict_end_path):
         self.args = args
         self.device = device
         
@@ -165,9 +174,14 @@ class Dataset(object):
         self.channel_machine = channel_machine
         self.ini_state_channel = self.channel_machine['ini_state']
         self.num_input_sym_channel = int(self.channel_machine['in_out'].shape[1]/2)
+        self.state_label = self.channel_machine['state_label']
+        self.dummy_dict_end_path = dummy_dict_end_path
         
         self.dummy_dict_start = dummy_dict_start
         self.dummy_dict_end = dummy_dict_end
+
+        self.loaded_model = loaded_model
+        self.resp  = np.asmatrix([0.00346311341209041,0.00266347902207479,	0.00309343823946191,	0.0591629837184036,	0.180446192639864,	0.249664568147311,	0.180446192639864,	0.0591629837184036,	0.00309343823946191,	0.00266347902207479,	0.00346311341209041])
 
     def data_generation_train(self, prob, batch_size_snr):
         '''
@@ -180,8 +194,8 @@ class Dataset(object):
         block_length = (args.dummy_length_start + args.eval_length + 
                         args.overlap_length + args.dummy_length_end)
         info_length = math.ceil((block_length - args.dummy_length_end)
-                                /self.num_out_sym)*self.num_input_sym_enc
-        
+                                /self.num_out_sym)*self.num_input_sym_enc  
+        #info_length = 36
         info = np.random.choice(np.arange(0, 2), size = (batch_size_snr, info_length), 
                                 p=[1-prob, prob])
         
@@ -189,23 +203,33 @@ class Dataset(object):
                              np.zeros((batch_size, args.eval_length+args.overlap_length)))
                 
         for i in range(batch_size_snr):
-            codeword = (self.precoding(self.encoder_constrain(info[i : i+1, :]))
-                        [:, :block_length - args.dummy_length_end])
+            codeword_constrain = self.encoder_constrain(info[i : i+1, :])
+            """ 
+            codeword = self.precoding(codeword_constrain)[:, :block_length - args.dummy_length_end]  """        
+            #codeword_constrain = info[i : i+1, :]
+            normal_codeword = self.precoding((codeword_constrain)[:, :block_length - args.dummy_length_end])
+            codeword = self.bpsk(normal_codeword)
+
             codeword_isi, state = self.e2pr4_channel(codeword)
-            codeword_isi_end = np.concatenate((codeword_isi, 
-                                               self.dummy_dict_end[state]), axis=1)
+            #codeword_isi = self.nneq(self.awgn(self.od500_readback(codeword), ))
+            #end = np.asmatrix(self.state_label[state])
+            codeword_end = np.concatenate((codeword, 
+                                               np.asmatrix([[-1, -1, -1, -1, -1]])), axis=1)
             
             for idx in np.arange(0, (args.snr_stop-args.snr_start)/args.snr_step+1):
                 label_bt[int(idx*batch_size_snr+i) : 
                          int(idx*batch_size_snr+i+1), 
-                         :] = (codeword[:, args.dummy_length_start:
+                         :] = (normal_codeword[:, args.dummy_length_start:
                                         block_length-args.dummy_length_end])
                 
-                codeword_noisy = self.awgn(codeword_isi_end[:, args.dummy_length_start:], 
-                                           args.snr_start+idx*args.snr_step)
+                encode_sequnce = codeword_end[:, args.dummy_length_start:]
+
+                codeword_noisy = self.nneq(self.awgn(self.od500_readback(encode_sequnce), args.snr_start+idx*args.snr_step))
+                """ codeword_noisy = self.awgn(codeword_isi_end[:, args.dummy_length_start:], 
+                                           args.snr_start+idx*args.snr_step) """
                 
                 data_bt[int(idx*batch_size_snr+i) : int(idx*batch_size_snr+i+1), 
-                        :args.dummy_length_start] = codeword_isi_end[:, :args.dummy_length_start]
+                        :args.dummy_length_start] = codeword_isi[:, :args.dummy_length_start]
                 data_bt[int(idx*batch_size_snr+i) : int(idx*batch_size_snr+i+1), 
                         args.dummy_length_start:] = codeword_noisy
         
@@ -221,12 +245,14 @@ class Dataset(object):
         '''
         
         info = np.random.randint(2, size = (1, args.eval_info_length))
-        codeword = self.precoding(self.encoder_constrain(info))
-        codeword_isi, _ = self.e2pr4_channel(codeword)
-        codeword_noisy = self.awgn(codeword_isi, snr)
+        normal_codeword = self.precoding(self.encoder_constrain(info))
+        #normal_codeword = self.precoding(info)
+        codeword = self.bpsk(normal_codeword)
+        #codeword_isi, _ = self.e2pr4_channel(codeword)
+        codeword_noisy = self.nneq(self.awgn(self.od500_readback(codeword), snr))
         
         data_eval = torch.from_numpy(codeword_noisy).float().to(self.device)
-        label_eval = codeword
+        label_eval = normal_codeword
         
         return data_eval, label_eval
         
@@ -305,13 +331,54 @@ class Dataset(object):
             
         return y, state[0]
     
+    def bpsk(self, x):
+        length = x.shape[1]
+        y = np.zeros((1, length))
+        for i in range(0, length):
+            if x[:, i] == 1:
+                y[:, i] = 1
+            else:
+                y[:, i] = -1
+        return y
+                
+
     def awgn(self, x, snr):
         '''
         AWGN channel
         '''
-        scaling_para = 0.25
+        """ scaling_para = 0.25
         sigma = np.sqrt(scaling_para * 10 ** (- snr * 1.0 / 10))
-        return x + sigma * np.random.normal(0, 1, x.shape)
+        return x + sigma * np.random.normal(0, 1, x.shape) """
+
+        np.random.seed(123)
+        snr = 10 ** (snr / 10.0)
+        xpower = np.sum(x ** 2) / len(x.T)
+        npower = xpower / snr
+        noise = np.random.randn(len(x.T)) * np.sqrt(npower)
+        return x + noise.T
+    
+    def nneq(self, x):
+        '''
+        nn equalizer
+        '''
+        self.loaded_model.eval()
+        x_len = len(x.T)
+        pad_unit = np.asmatrix([-1, -1, -1])
+        pad_array = np.concatenate((pad_unit, x, pad_unit), axis=1)
+        window_size = 7
+        stride = 1
+        output = np.zeros((1, x_len))
+        for i in range(0, pad_array.shape[1] - window_size + 1, stride):
+            window_data = pad_array[:, i:i+window_size]
+            data_tensor = torch.FloatTensor(window_data)
+            with torch.no_grad():
+                output_symbol = self.loaded_model(data_tensor.to(self.device))
+                output[:, i] = output_symbol.cpu().numpy()
+        return output
+
+    def od500_readback(self, x):
+        return convolve2d(x, self.resp, "same")
+
     
 class Model(nn.Module):
     def __init__(self, args, device):
@@ -355,6 +422,26 @@ class Model(nn.Module):
         dec = torch.sigmoid(self.dec_output(y_dec))
         
         return torch.squeeze(dec, 2)
+
+class CustomModel(nn.Module):
+    def __init__(self, input_size, hidden_size, output_size):
+        super(CustomModel, self).__init__()
+        self.fc1 = nn.Linear(input_size, hidden_size)
+        self.tanh = nn.Tanh()
+        self.sigmoid = nn.Sigmoid()
+        self.fc2 = nn.Linear(hidden_size, hidden_size)
+        self.fc3 = nn.Linear(hidden_size, output_size)
+        
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.tanh(x)
+        """  x = self.fc2(x)
+        x = self.tanh(x)
+        x = self.fc2(x)
+        x = self.sigmoid(x) """
+        x = self.fc3(x)
+        return x   
     
 def train(data_class, prob, model, optimizer, epoch, device):
 
@@ -407,10 +494,10 @@ def validate(data_class, prob, channel_dict, dummy_dict_start,
               format(epoch+1, valid_loss.item()))
     
     # evaluation for a very long sequence
-    ber = np.ones((1, int((args.snr_stop-args.snr_start)/args.snr_step+1)))
+    ber = np.ones((1, int((args.snr_stop-args.snr_start)/args.snr_step-1)))
     
     if (epoch >= args.eval_start) & (epoch % args.eval_freq == 0):
-        for idx in np.arange(0, int((args.snr_stop-args.snr_start)/args.snr_step+1)):
+        for idx in np.arange(0, int((args.snr_stop-args.snr_start)/args.snr_step-1)):
             data_eval, label_eval = (data_class.data_generation_eval
                                      (args.snr_start+idx*args.snr_step))
             dec = evaluation(data_eval, dummy_dict_start, dummy_dict_end_eval, 
@@ -446,8 +533,8 @@ def evaluation(x, dummy_dict_start, dummy_dict_end_eval,
                                       dummy_dict_end_eval), 1)
         truncation_in = data_class.sliding_shape(truncation_block)
         with torch.no_grad():
-            dec_block = codeword_threshold(model(truncation_in)
-                                           [:, :args.eval_length])
+            model_out = model(truncation_in)[:, :args.eval_length]                            
+            dec_block = codeword_threshold(model_out)
         # concatenate the decoding codeword
         dec = torch.cat((dec, dec_block), 1)
         
@@ -460,9 +547,18 @@ def evaluation(x, dummy_dict_start, dummy_dict_end_eval,
         
     return dec
 
+def test():
+    csv_tx_path = "PR-NN_Detector_PRchannel/individual/tx_waveform001.csv"
+    csv_data_path = 'PR-NN_Detector_PRchannel/individual/test_data_snr10.csv'
+    checkpoint_path = 'PR-NN_Detector_PRchannel/checkpoint_2.pth.tar'
+    tx_frame = np.loadtxt(csv_tx_path,dtype=np.float32,delimiter=',')
+    data_frame0 = np.loadtxt(csv_data_path,dtype=np.float32,delimiter=',')
+    data_frame = torch.from_numpy(data_frame0).float().to
+
+
 def loss_func(output, label):
     
-    return F.binary_cross_entropy(output, label).cuda()
+    return F.binary_cross_entropy_with_logits(output, label).cuda()
 
 def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
     torch.save(state, filename)
