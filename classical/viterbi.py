@@ -12,7 +12,7 @@ np.random.seed(12345)
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument('-info_len', type=int, default=1000000)
+parser.add_argument('-info_len', type=int, default=10000)
 parser.add_argument('-truncation_len', type=int, default=30)
 parser.add_argument('-overlap_len', type=int, default=30)
 

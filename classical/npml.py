@@ -14,16 +14,16 @@ np.random.seed(12345)
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument('-info_len', type=int, default=100)
+parser.add_argument('-info_len', type=int, default=1000)
 parser.add_argument('-truncation_len', type=int, default=30)
 parser.add_argument('-overlap_len', type=int, default=30)
 
-parser.add_argument('-snr_start', type=float, default=8)
-parser.add_argument('-snr_stop', type=float, default=9)
-parser.add_argument('-snr_step', type=float, default=0.5)
+parser.add_argument('-snr_start', type=float, default=4)
+parser.add_argument('-snr_stop', type=float, default=12)
+parser.add_argument('-snr_step', type=float, default=1)
 
 parser.add_argument('-scaling_para', type=float, default=0.25)
-parser.add_argument('-PW50', type=float, default=2.54)
+parser.add_argument('-PW50', type=float, default=2.88)
 parser.add_argument('-T', type=float, default=1)
 parser.add_argument('-tap_lor_num', type=int, default=41)
 parser.add_argument('-tap_isi_num', type=int, default=21)
@@ -56,7 +56,7 @@ def main():
     num_ber = int((args.snr_stop-args.snr_start)/args.snr_step+1)
     
     info = np.random.randint(2, size = (1, args.info_len+dummy_len))
-    codeword = encoder.precoding(encoder.encoder_constrain(info))
+    codeword = encoder.precoding(encoder.encoder_constrain(info)) #RLL编码序列
     output_isi_perfect = channel.e2pr4_channel(codeword)
     
     # imperfect equalization
@@ -80,6 +80,7 @@ def main():
         ber_color = (np.count_nonzero(np.abs(codeword[:, 0:codeword_len] - 
                                              dec_npml[:, 0:codeword_len])) / codeword_len)
         print("The bit error rate (BER) is:")
+        ber_color = round(ber_color,7)
         print(ber_color)
 
 ## Channel: EEPR4 memory channel and AWGN
@@ -361,7 +362,7 @@ class NPML(object):
         return path_truncation
 
     def path_to_word(self, path, state):
-        '''
+        ''' 
         Input: (1, length) array
         Output: (1, length-1) array
         Mapping: connection between two states determines one word

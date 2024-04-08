@@ -22,7 +22,7 @@ parser = argparse.ArgumentParser()
 # learning parameters
 parser.add_argument('-learning_rate', type = float, default=0.001)
 parser.add_argument('-momentum', type=float, default=0.9)
-parser.add_argument('-num_epoch', type=int, default=5)
+parser.add_argument('-num_epoch', type=int, default=30)
 parser.add_argument('-epoch_start', type=int, default=0)
 parser.add_argument('-num_batch', type=int, default=200)
 parser.add_argument('-weight_decay', type=float, default=0.0001)
@@ -35,7 +35,7 @@ parser.add_argument('-batch_size_snr_validate', type=int, default=600)
 
 parser.add_argument('-prob_start', type=float, default=0.1)
 parser.add_argument('-prob_up', type=float, default=0.01)
-parser.add_argument('-prob_step_ep', type=int, default=50)
+parser.add_argument('-prob_step_ep', type=int, default=1)
 
 # storing path
 parser.add_argument('-result', type=str, default='result.txt')
@@ -44,7 +44,7 @@ parser.add_argument('-resume', default='', type=str, metavar='PATH',
                     help='path to latest checkpoint (default:none)')
 
 # PR-NN parameters
-parser.add_argument('-eval_info_length', type=int, default=1000000)
+parser.add_argument('-eval_info_length', type=int, default=10000)
 parser.add_argument('-dummy_length_start', type=int, default=5)
 parser.add_argument('-dummy_length_end', type=int, default=5)
 parser.add_argument('-eval_length', type=int, default=10)
@@ -55,13 +55,15 @@ parser.add_argument('-input_size', type=int, default=5)
 parser.add_argument('-rnn_input_size', type=int, default=5)
 parser.add_argument('-rnn_hidden_size', type=int, default=50)
 parser.add_argument('-output_size', type=int, default=1)
-parser.add_argument('-rnn_layer', type=int, default=4)
+parser.add_argument('-rnn_layer', type=int, default=5)
 parser.add_argument('-rnn_dropout_ratio', type=float, default=0)
 
 # channel parameters
-parser.add_argument('-snr_start', type=float, default=9.999)
-parser.add_argument('-snr_stop', type=float, default=10.003)
+parser.add_argument('-snr_start', type=float, default=10.999)
+parser.add_argument('-snr_stop', type=float, default=11.003)
 parser.add_argument('-snr_step', type=float, default=0.001)
+parser.add_argument('-eval_snr_start', type=float, default= 9)
+parser.add_argument('-eval_snr_stop', type=float, default= 13)
 
 #test mode
 parser.add_argument('-test_mode', type=int, default=0)
@@ -72,13 +74,13 @@ def main():
     args = parser.parse_known_args()[0]
     
     # cuda device
-    os.environ['CUDA_VISIBLE_DEVICES'] = "0"
+    os.environ['CUDA_VISIBLE_DEVICES'] = "1"
     if torch.cuda.is_available():
         device = torch.device("cuda")
-    for snr in range(12, 24, 2):
+    for snr in range(11, 12, 1):
         # write the results
-        dir_name = './output_' + datetime.datetime.strftime(datetime.datetime.now(), 
-                                                            '%Y-%m-%d_%H:%M:%S') + '/'
+        dir_name = './output_EE_' + datetime.datetime.strftime(datetime.datetime.now(), 
+                                                            '%Y-%m-%d_%H:%M:%S') + '_snr' + str(snr) + '/'
         os.mkdir(dir_name)
         result_path = dir_name + args.result
         result = open(result_path, 'w+')
@@ -86,19 +88,18 @@ def main():
         # data loader
         (encoder_dict, channel_dict, dummy_dict_start, 
         dummy_dict_end, dummy_dict_end_path ,dummy_dict_end_eval) = Constant_od()
-        
+        loaded_model = torch.load('/home/likefei/PR-NN_Detector_PRchannel/individual/nneq_snr' + str(snr - 1) + '.pt')
+        args.checkpoint = './checkpoint_awgn_CNN_snr' + str(snr) + '.pth.tar'
+        args.snr_start = snr - 0.001
+        args.snr_stop = snr + 0.003
         data_class = Dataset(args, device, encoder_dict, channel_dict, 
                             dummy_dict_start, dummy_dict_end, loaded_model, dummy_dict_end_path)
         
         snr_point = int((args.snr_stop-args.snr_start)/args.snr_step+1)
-        
-
-        loaded_model = torch.load('/home/likefei/PR-NN_Detector_PRchannel/individual/nneq_snr' + str(snr) + '.pt')
-        args.checkpoint = './checkpoint_awgn_snr' + str(snr) + '.pth.tar'
-        args.snr_start = snr - 0.001
-        args.snr_end = snr + 0.003
+    
         # model
         model = Model(args, device).to(device)
+        #model = CNN_Model(args, device).to(device)
         
         # criterion and optimizer
         optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), 
@@ -224,7 +225,7 @@ class Dataset(object):
                 
                 encode_sequnce = codeword_end[:, args.dummy_length_start:]
 
-                codeword_noisy = self.nneq(self.awgn(self.od500_readback(encode_sequnce), args.snr_start+idx*args.snr_step))
+                codeword_noisy = (self.awgn(self.od500_readback(encode_sequnce), args.snr_start+idx*args.snr_step))
                 """ codeword_noisy = self.awgn(codeword_isi_end[:, args.dummy_length_start:], 
                                            args.snr_start+idx*args.snr_step) """
                 
@@ -249,7 +250,7 @@ class Dataset(object):
         #normal_codeword = self.precoding(info)
         codeword = self.bpsk(normal_codeword)
         #codeword_isi, _ = self.e2pr4_channel(codeword)
-        codeword_noisy = self.nneq(self.awgn(self.od500_readback(codeword), snr))
+        codeword_noisy = (self.awgn(self.od500_readback(codeword), snr))
         
         data_eval = torch.from_numpy(codeword_noisy).float().to(self.device)
         label_eval = normal_codeword
@@ -436,13 +437,114 @@ class CustomModel(nn.Module):
     def forward(self, x):
         x = self.fc1(x)
         x = self.tanh(x)
-        """  x = self.fc2(x)
-        x = self.tanh(x)
-        x = self.fc2(x)
-        x = self.sigmoid(x) """
         x = self.fc3(x)
-        return x   
-    
+        return x  
+
+class E2E_Model(nn.Module):
+    def __init__(self, args, device):
+        super(Model, self).__init__()
+        
+        '''
+        time_step: total number of time steps in RNN
+        fc_length: input length to linear layer
+        dec_input: input linear network
+        dec_rnn: rnn network
+        dec_output: output linear network
+        '''
+        
+        self.args = args
+        self.device = device
+        self.time_step = (args.dummy_length_start + args.eval_length 
+                          + args.overlap_length + args.dummy_length_end)
+        self.fc_length = args.eval_length + args.overlap_length
+        self.dec_input = torch.nn.Linear(args.input_size, 
+                                         args.rnn_input_size)
+        self.dec_rnn = torch.nn.GRU(args.rnn_input_size, 
+                                    args.rnn_hidden_size, 
+                                    args.rnn_layer, 
+                                    bias=True, 
+                                    batch_first=True,
+                                    dropout=args.rnn_dropout_ratio, 
+                                    bidirectional=True)
+        
+        self.dec_output = torch.nn.Linear(2*args.rnn_hidden_size, args.output_size)
+        
+    def forward(self, x):
+        batch_size = x.size(0)
+        dec = torch.zeros(batch_size, self.fc_length, 
+                          args.output_size).to(self.device)
+        
+        x = self.dec_input(x)
+        y, _  = self.dec_rnn(x)
+        y_dec = y[:, args.dummy_length_start : 
+                  self.time_step-args.dummy_length_end, :]
+
+        dec = torch.sigmoid(self.dec_output(y_dec))
+        
+        return torch.squeeze(dec, 2)
+ 
+class CNN_Model(nn.Module):
+    def __init__(self, args, device):
+        super(CNN_Model, self).__init__()
+        
+        '''
+        time_step: total number of time steps in RNN
+        fc_length: input length to linear layer
+        dec_input: input linear network
+        dec_rnn: rnn network
+        dec_output: output linear network
+        '''
+        
+        self.args = args
+        self.device = device
+        self.time_step = (args.dummy_length_start + args.eval_length 
+                          + args.overlap_length + args.dummy_length_end)
+        self.dec_input = torch.nn.Linear(args.input_size, 
+                                         5)
+        self.conv2 = torch.nn.Conv1d(in_channels=5, out_channels=10, kernel_size=3)
+        self.conv3 = torch.nn.Conv1d(in_channels=10, out_channels=20, kernel_size=3)
+        self.conv4 = torch.nn.Conv1d(in_channels=20, out_channels=10, kernel_size=3)
+        self.conv5 = torch.nn.Conv1d(in_channels=10, out_channels=5, kernel_size=3)
+        self.conv6 = torch.nn.Conv1d(in_channels=5, out_channels=1, kernel_size=3)
+        
+        self.fc1 = torch.nn.Linear(100, 1)
+
+        self.relu = torch.nn.ReLU()
+        
+        self.pool = torch.nn.MaxPool1d(kernel_size=2, stride=2)
+
+        
+    def forward(self, x):
+        x = self.dec_input(x)
+        x = self.conv2(x)
+        x = self.relu(x)
+        x = self.pool(x)
+        # 第三层卷积层
+        x = self.conv3(x)
+        x = self.relu(x)
+        x = self.pool(x)
+        # 第四层卷积层
+        x = self.conv4(x)
+        x = self.relu(x)
+        x = self.pool(x)
+        # 第五层卷积层
+        x = self.conv5(x)
+        x = self.relu(x)
+        x = self.pool(x)
+        # 第六层卷积层
+        x = self.conv6(x)
+        # 输出的维度：(batch_size, out_channels, seq_len_after_pooling)
+        # 这里假设池化后的长度为1
+        # 可以根据实际情况调整池化层的参数来控制输出的长度
+        # 如果希望输出一个值，可以使用 nn.Linear 层将输出展平为一维向量，然后进行全连接操作
+        x = x.view(-1, 1*1*1)  # 将输出展平
+        # 全连接层
+        x = self.fc1(x)
+        x = torch.sigmoid(x)
+        
+
+        return torch.squeeze(x,2)
+
 def train(data_class, prob, model, optimizer, epoch, device):
 
     # switch to train mode
@@ -494,17 +596,17 @@ def validate(data_class, prob, channel_dict, dummy_dict_start,
               format(epoch+1, valid_loss.item()))
     
     # evaluation for a very long sequence
-    ber = np.ones((1, int((args.snr_stop-args.snr_start)/args.snr_step-1)))
+    ber = np.ones((1,5))
     
     if (epoch >= args.eval_start) & (epoch % args.eval_freq == 0):
-        for idx in np.arange(0, int((args.snr_stop-args.snr_start)/args.snr_step-1)):
+        for idx in np.arange(0, int((args.eval_snr_stop-args.eval_snr_start)+1)):
             data_eval, label_eval = (data_class.data_generation_eval
-                                     (args.snr_start+idx*args.snr_step))
+                                     (args.eval_snr_start+idx))
             dec = evaluation(data_eval, dummy_dict_start, dummy_dict_end_eval, 
                              channel_dict, data_class, model, device)
             ber[0, idx] = (np.sum(np.abs(dec.cpu().numpy() - label_eval))
                            /label_eval.shape[1])
-        print('Validation Epoch: {} ber: {}'.format(epoch+1, ber))
+        print('Validation Epoch: {} '.format(epoch+1) + ' ber: {}'.format(ber, '.8f')) 
          
     return valid_loss.item(), ber
         

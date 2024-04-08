@@ -32,10 +32,10 @@ input_size =  7# 你的输入特征维度
 hidden_size = 60
 output_size = 1  # 回归问题通常是单一输出
 learning_rate = 0.001
-epochs = 60
+epochs = 150
 
 # 创建数据集
-total_bits = 90000
+total_bits = 160000
 target = np.asmatrix([1,2,2,2,1])
 resp = np.asmatrix([0.00346311341209041,0.00266347902207479,	0.00309343823946191,	0.0591629837184036,	0.180446192639864,	0.249664568147311,	0.180446192639864,	0.0591629837184036,	0.00309343823946191,	0.00266347902207479,	0.00346311341209041])
 random_array = np.random.choice([-1, 1], size=(1, total_bits))
@@ -43,7 +43,7 @@ readback_signal = convolve2d(random_array, resp, mode="same")
 ideal_output = np.asmatrix(convolve2d(random_array, target, mode="same")) / np.sqrt(65)
 np.random.seed(123)
 #add noise to readback signal
-for si in range(10, 24, 2):
+for si in range(9, 10, 1):
     readback_signal_copy = readback_signal
     snr = 10 ** (si / 10.0)
     xpower = np.sum(readback_signal_copy ** 2) / len(readback_signal_copy.T)
@@ -94,8 +94,8 @@ for si in range(10, 24, 2):
     train_dataset, val_dataset, test_dataset = random_split(TensorDataset(X_tensor, y_tensor), [train_size, val_size, test_size])
 
     # 创建数据加载器并将数据移动到 GPU 上
-    train_dataloader = DataLoader(train_dataset, batch_size=64, shuffle=True)
-    val_dataloader = DataLoader(val_dataset, batch_size=64, shuffle=True)
+    train_dataloader = DataLoader(train_dataset, batch_size=128, shuffle=True)
+    val_dataloader = DataLoader(val_dataset, batch_size=128, shuffle=True)
     #test_dataloader = DataLoader(test_dataset, batch_size=128, shuffle=False)
 
     # 初始化模型，并将模型参数移动到 GPU 上
